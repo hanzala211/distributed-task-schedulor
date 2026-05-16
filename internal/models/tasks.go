@@ -11,4 +11,5 @@ type Tasks struct {
 	Payload   json.RawMessage `json:"payload"`
 	RunAt     time.Time       `json:"run_at"`
 	Status    string          `json:"status"`
+	Priority  int             `json:"priority"`
 }

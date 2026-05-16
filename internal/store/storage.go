@@ -11,6 +11,7 @@ type Storage struct {
 		InsertTask(ctx context.Context, req *models.AddTaskAPIDTO) (*models.Tasks, error)
 		FetchDueTasks(ctx context.Context) ([]*models.Tasks, error)
 		ChangeTaskStatus(ctx context.Context, taskID string, status string) error
+		MarkTaskStatusFailed(ctx context.Context, taskID string) error
 	}
 }
 
