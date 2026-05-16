@@ -29,5 +29,18 @@ services:
     depends_on:
       - postgres-db
 
+  task-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: go-worker
+    command: go run cmd/worker/main.go
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      - postgres-db
+
 volumes:
   pgdata:

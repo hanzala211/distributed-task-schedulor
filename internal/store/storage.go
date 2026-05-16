@@ -9,6 +9,8 @@ import (
 type Storage struct {
 	Tasks interface {
 		InsertTask(ctx context.Context, req *models.AddTaskAPIDTO) (*models.Tasks, error)
+		FetchDueTasks(ctx context.Context) ([]*models.Tasks, error)
+		ChangeTaskStatus(ctx context.Context, taskID string, status string) error
 	}
 }
 

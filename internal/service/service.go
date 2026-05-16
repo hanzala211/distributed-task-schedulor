@@ -7,13 +7,13 @@ import (
 )
 
 type Service struct {
-	TaskService interface {
+	Task interface {
 		InsertTask(ctx context.Context, req *models.AddTaskAPIDTO) (*models.Tasks, error)
 	}
 }
 
 func NewService(t *TaskService) *Service {
 	return &Service{
-		TaskService: t,
+		Task: t,
 	}
 }

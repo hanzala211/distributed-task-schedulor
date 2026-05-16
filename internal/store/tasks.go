@@ -29,3 +29,40 @@ func (t *TasksRepo) InsertTask(ctx context.Context, req *models.AddTaskAPIDTO) (
 	}
 	return task, nil
 }
+
+func (t *TasksRepo) FetchDueTasks(ctx context.Context) ([]*models.Tasks, error) {
+	tasks := []*models.Tasks{}
+	query := `UPDATE tasks SET status = 'running' WHERE id IN (
+		SELECT id FROM tasks t
+		WHERE status = 'pending' AND run_at <= NOW()
+		ORDER BY run_at ASC
+		FOR UPDATE SKIP LOCKED
+		LIMIT 10
+	) RETURNING id, target_url, payload;`
+	rows, err := t.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		task := &models.Tasks{}
+		err := rows.Scan(&task.ID, &task.TargetURL, &task.Payload)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func (t *TasksRepo) ChangeTaskStatus(ctx context.Context, taskID string, status string) error {
+	query := `UPDATE tasks SET status = $1 WHERE id = $2;`
+	_, err := t.db.ExecContext(ctx, query, status, taskID)
+	if err != nil {
+		return err
+	}
+	return nil
+}

@@ -13,7 +13,7 @@ func (app *application) addTask(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	task, err := app.service.TaskService.InsertTask(r.Context(), &req)
+	task, err := app.service.Task.InsertTask(r.Context(), &req)
 	if err != nil {
 		app.logger.Error("failed to add task", zap.Error(err))
 		app.writeJSONError(w, http.StatusInternalServerError, "Server Error")
