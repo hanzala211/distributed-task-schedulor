@@ -1,0 +1,16 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  # Build the worker binary
+  cmd = "go build -o tmp/worker cmd/worker/main.go"
+
+  # Run the binary (fixes the deprecation warning)
+  entrypoint = "./tmp/worker"
+
+  # Pass signals gracefully
+  send_interrupt = true
+  kill_delay = "5s"
+
+  # Optional: Don't rebuild if only backend files change
+  exclude_dir = ["assets", "tmp", "vendor", "cmd/api"]

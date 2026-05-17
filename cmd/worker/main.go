@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os/signal"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/hanzala211/go-backend-template/internal/db"
 	"github.com/hanzala211/go-backend-template/internal/env"
 	"github.com/hanzala211/go-backend-template/internal/models"
+	"github.com/hanzala211/go-backend-template/internal/service"
 	"github.com/hanzala211/go-backend-template/internal/store"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
@@ -25,11 +29,16 @@ var httpClient = &http.Client{
 	},
 }
 
+const maxRetries = 3
+const batchSize = 10
+
 func main() {
 	err := godotenv.Load()
 	if err != nil {
 		log.Printf("Failed to load .env: %v\n", err)
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 	loggerProd, _ := zap.NewDevelopment()
 	defer loggerProd.Sync()
 	logger := loggerProd.Sugar()
@@ -43,40 +52,55 @@ func main() {
 	))
 	taskStore := store.NewTaskRepo(db)
 	store := store.NewStorage(taskStore)
+	taskService := service.NewTaskService(store)
+	service := service.NewService(taskService)
 	ticker := time.NewTicker(1 * time.Second)
+	var wg sync.WaitGroup
 
 	tasksChan := make(chan *models.Tasks, 100)
 	const workersNum = 3
 	for w := 0; w < workersNum; w++ {
-		go workerNode(tasksChan, logger, store, w)
+		wg.Add(1)
+		go workerNode(tasksChan, logger, service, w, &wg)
 	}
-	for range ticker.C {
-		ctx := context.Background()
-		tasks, err := store.Tasks.FetchDueTasks(ctx)
-		if err != nil {
-			logger.Error("Failed to fetch tasks", err)
-		}
+	keepRunning := true
+	for keepRunning {
+		select {
+		case <-ctx.Done():
+			logger.Info("Got Shutdown signal")
+			ticker.Stop()
+			keepRunning = false
+		case <-ticker.C:
+			tasks, err := service.Task.FetchDueTasks(ctx, batchSize)
+			if err != nil {
+				logger.Error("Failed to fetch tasks", err)
+			}
 
-		for _, task := range tasks {
-			logger.Infow("Executing task", "task_id", task.ID, "target", task.TargetURL)
-			tasksChan <- task
+			for _, task := range tasks {
+				logger.Infow("Executing task", "task_id", task.ID, "target", task.TargetURL)
+				tasksChan <- task
+			}
 		}
 	}
+	close(tasksChan)
+	wg.Wait()
+	logger.Info("All Channels are closed!")
 }
 
-func workerNode(tasks chan *models.Tasks, logger *zap.SugaredLogger, store *store.Storage, workerID int) {
-	ctx := context.Background()
-	for task := range tasks {
+func workerNode(task chan *models.Tasks, logger *zap.SugaredLogger, service *service.Service, workerID int, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for task := range task {
+		ctx := context.Background()
 		httpReq, err := http.NewRequest("POST", task.TargetURL, bytes.NewBuffer(task.Payload))
 		if err != nil {
-			store.Tasks.MarkTaskStatusFailed(ctx, task.ID)
+			service.Task.HandleTaskFailure(ctx, task, maxRetries)
 			logger.Errorw("Failed to create the HTTP Req", "error", err, "taskId", task.ID, "Prority", task.Priority, "Worker", workerID)
 			continue
 		}
 		httpReq.Header.Add("Content-Type", "application/json")
 		resp, err := httpClient.Do(httpReq)
 		if err != nil {
-			err := store.Tasks.MarkTaskStatusFailed(ctx, task.ID)
+			err := service.Task.HandleTaskFailure(ctx, task, maxRetries)
 			if err != nil {
 				logger.Errorw("CRITICAL: Failed to update database status", "error", err, "task_id", task.ID, "Priority", task.Priority, "Worker", workerID)
 			}
@@ -85,10 +109,10 @@ func workerNode(tasks chan *models.Tasks, logger *zap.SugaredLogger, store *stor
 		}
 		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
 			logger.Infow("Webhook delivered successfully", "status", resp.StatusCode, "task_id", task.ID, "Priority", task.Priority, "Worker", workerID)
-			store.Tasks.ChangeTaskStatus(ctx, task.ID, "succeed")
+			service.Task.ChangeStatus(ctx, task, "succeed")
 		} else {
 			logger.Errorw("Webhook rejected by target", "status", resp.StatusCode, "task_id", task.ID, "Priority", task.Priority, "Worker", workerID)
-			store.Tasks.MarkTaskStatusFailed(ctx, task.ID)
+			service.Task.HandleTaskFailure(ctx, task, maxRetries)
 		}
 		resp.Body.Close()
 	}

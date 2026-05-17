@@ -34,7 +34,7 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     container_name: go-worker
-    command: go run cmd/worker/main.go
+    command: air -c .air.worker.toml
     volumes:
       - .:/app
     env_file:

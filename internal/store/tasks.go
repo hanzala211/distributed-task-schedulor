@@ -17,13 +17,13 @@ func NewTaskRepo(db *sql.DB) *TasksRepo {
 	}
 }
 
-func (t *TasksRepo) InsertTask(ctx context.Context, req *models.AddTaskAPIDTO) (*models.Tasks, error) {
+func (t *TasksRepo) InsertTask(ctx context.Context, tasksModel *models.Tasks, dependencies []string) (*models.Tasks, error) {
 	task := &models.Tasks{}
-	if len(req.Dependencies) == 0 {
-		query := `INSERT INTO tasks (target_url, payload, run_at, priority)
-		VALUES ($1, $2, $3, $4)
+	if len(dependencies) == 0 {
+		query := `INSERT INTO tasks (target_url, payload, run_at, priority, status)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, target_url, payload, run_at, status, priority;`
-		err := t.db.QueryRowContext(ctx, query, req.TargetURL, req.Payload, req.RunAt, req.Priority).
+		err := t.db.QueryRowContext(ctx, query, tasksModel.TargetURL, tasksModel.Payload, tasksModel.RunAt, tasksModel.Priority, tasksModel.Status).
 			Scan(&task.ID, &task.TargetURL, &task.Payload, &task.RunAt, &task.Status, &task.Priority)
 		if err != nil {
 			return nil, err
@@ -38,17 +38,17 @@ func (t *TasksRepo) InsertTask(ctx context.Context, req *models.AddTaskAPIDTO) (
 	defer tx.Rollback()
 
 	query := `INSERT INTO tasks (target_url, payload, run_at, priority, status)
-		VALUES ($1, $2, $3, $4, 'waiting')
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, target_url, payload, run_at, status, priority;`
 
-	err = tx.QueryRowContext(ctx, query, req.TargetURL, req.Payload, req.RunAt, req.Priority).
+	err = tx.QueryRowContext(ctx, query, tasksModel.TargetURL, tasksModel.Payload, tasksModel.RunAt, tasksModel.Priority, tasksModel.Status).
 		Scan(&task.ID, &task.TargetURL, &task.Payload, &task.RunAt, &task.Status, &task.Priority)
 	if err != nil {
 		return nil, err
 	}
 
 	query2 := `INSERT INTO task_dependencies (parent_id, child_id) VALUES ($1, $2)`
-	for _, parentID := range req.Dependencies {
+	for _, parentID := range dependencies {
 		_, err := tx.ExecContext(ctx, query2, parentID, task.ID)
 		if err != nil {
 			return nil, err
@@ -61,16 +61,16 @@ func (t *TasksRepo) InsertTask(ctx context.Context, req *models.AddTaskAPIDTO) (
 	return task, nil
 }
 
-func (t *TasksRepo) FetchDueTasks(ctx context.Context) ([]*models.Tasks, error) {
+func (t *TasksRepo) FetchDueTasks(ctx context.Context, batchSize int) ([]*models.Tasks, error) {
 	tasks := []*models.Tasks{}
 	query := `UPDATE tasks SET status = 'running' WHERE id IN (
 		SELECT id FROM tasks t
 		WHERE status = 'pending' AND run_at <= NOW()
 		ORDER BY priority DESC, run_at ASC
 		FOR UPDATE SKIP LOCKED
-		LIMIT 10
+		LIMIT $1
 	) RETURNING id, target_url, payload, priority;`
-	rows, err := t.db.QueryContext(ctx, query)
+	rows, err := t.db.QueryContext(ctx, query, batchSize)
 	if err != nil {
 		return nil, err
 	}
@@ -89,16 +89,16 @@ func (t *TasksRepo) FetchDueTasks(ctx context.Context) ([]*models.Tasks, error) 
 	return tasks, nil
 }
 
-func (t *TasksRepo) ChangeTaskStatus(ctx context.Context, taskID string, status string) error {
-	if status != "succeed" {
-
-		query := `UPDATE tasks SET status = $1 WHERE id = $2;`
-		_, err := t.db.ExecContext(ctx, query, status, taskID)
-		if err != nil {
-			return err
-		}
-		return nil
+func (t *TasksRepo) UpdateTaskStatus(ctx context.Context, status string, taskID string) error {
+	query := `UPDATE tasks SET status = $1 WHERE id = $2;`
+	_, err := t.db.ExecContext(ctx, query, status, taskID)
+	if err != nil {
+		return err
 	}
+	return nil
+}
+
+func (t *TasksRepo) MarkTaskSucceed(ctx context.Context, taskID string) error {
 	tx, err := t.db.BeginTx(ctx, nil)
 	defer tx.Rollback()
 
@@ -129,21 +129,12 @@ func (t *TasksRepo) ChangeTaskStatus(ctx context.Context, taskID string, status 
 	return nil
 }
 
-func (t *TasksRepo) MarkTaskStatusFailed(ctx context.Context, taskID string) error {
+func (t *TasksRepo) MarkTaskStatusFailed(ctx context.Context, task *models.Tasks) error {
 	query := `UPDATE tasks
-		SET
-			status = CASE
-						WHEN retry_count < max_retries THEN 'pending'
-						ELSE 'failed'
-					 END,
-			run_at = CASE
-						WHEN retry_count < max_retries THEN NOW() + INTERVAL '30 seconds'
-						ELSE run_at
-					 END,
-			retry_count = retry_count + 1
+		SET status = $2, run_at = $3, retry_count = $4
 		WHERE id = $1;
 	`
-	_, err := t.db.ExecContext(ctx, query, taskID)
+	_, err := t.db.ExecContext(ctx, query, task.ID, task.Status, task.RunAt, task.RetryCount)
 	if err != nil {
 		return err
 	}

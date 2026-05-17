@@ -8,10 +8,11 @@ import (
 
 type Storage struct {
 	Tasks interface {
-		InsertTask(ctx context.Context, req *models.AddTaskAPIDTO) (*models.Tasks, error)
-		FetchDueTasks(ctx context.Context) ([]*models.Tasks, error)
-		ChangeTaskStatus(ctx context.Context, taskID string, status string) error
-		MarkTaskStatusFailed(ctx context.Context, taskID string) error
+		InsertTask(ctx context.Context, tasksModel *models.Tasks, dependencies []string) (*models.Tasks, error)
+		FetchDueTasks(ctx context.Context, batchSize int) ([]*models.Tasks, error)
+		MarkTaskSucceed(ctx context.Context, taskID string) error
+		MarkTaskStatusFailed(ctx context.Context, task *models.Tasks) error
+		UpdateTaskStatus(ctx context.Context, status string, taskID string) error
 	}
 }
 

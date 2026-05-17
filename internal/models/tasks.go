@@ -6,10 +6,11 @@ import (
 )
 
 type Tasks struct {
-	ID        string          `json:"id"`
-	TargetURL string          `json:"target_url"`
-	Payload   json.RawMessage `json:"payload"`
-	RunAt     time.Time       `json:"run_at"`
-	Status    string          `json:"status"`
-	Priority  int             `json:"priority"`
+	ID         string          `json:"id"`
+	TargetURL  string          `json:"target_url"`
+	Payload    json.RawMessage `json:"payload"`
+	RunAt      time.Time       `json:"run_at"`
+	Status     string          `json:"status"`
+	Priority   int             `json:"priority"`
+	RetryCount int             `json:"retry_count"`
 }
