@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/hanzala211/go-backend-template/internal/models"
@@ -29,7 +30,14 @@ func (t *TaskService) InsertTask(ctx context.Context, req *models.AddTaskAPIDTO)
 	if len(req.Dependencies) > 0 {
 		task.Status = "waiting"
 	}
-	return t.store.Tasks.InsertTask(ctx, task, req.Dependencies)
+	res, err := t.store.Tasks.InsertTask(ctx, task, req.Dependencies)
+	if err != nil {
+		return nil, &AppError{
+			Message: "failed to insert task",
+			Err:     fmt.Errorf("store error: %w", err),
+		}
+	}
+	return res, nil
 }
 
 func (t *TaskService) HandleTaskFailure(ctx context.Context, task *models.Tasks, maxRetries int) error {
@@ -40,16 +48,40 @@ func (t *TaskService) HandleTaskFailure(ctx context.Context, task *models.Tasks,
 		task.Status = "pending"
 		task.RunAt = time.Now().Add(30 * time.Second)
 	}
-	return t.store.Tasks.MarkTaskStatusFailed(ctx, task)
+	err := t.store.Tasks.MarkTaskStatusFailed(ctx, task)
+	if err != nil {
+		return &AppError{
+			Message: fmt.Sprintf("failed to handle task failure for task %s", task.ID),
+			Err:     fmt.Errorf("store error: %w", err),
+		}
+	}
+	return nil
 }
 
 func (t *TaskService) ChangeStatus(ctx context.Context, task *models.Tasks, newStatus string) error {
+	var err error
 	if newStatus == "succeed" {
-		return t.store.Tasks.MarkTaskSucceed(ctx, task.ID)
+		err = t.store.Tasks.MarkTaskSucceed(ctx, task.ID)
+	} else {
+		err = t.store.Tasks.UpdateTaskStatus(ctx, newStatus, task.ID)
 	}
-	return t.store.Tasks.UpdateTaskStatus(ctx, newStatus, task.ID)
+
+	if err != nil {
+		return &AppError{
+			Message: fmt.Sprintf("failed to change status to %s for task %s", newStatus, task.ID),
+			Err:     fmt.Errorf("store error: %w", err),
+		}
+	}
+	return nil
 }
 
 func (t *TaskService) FetchDueTasks(ctx context.Context, batchSize int) ([]*models.Tasks, error) {
-	return t.store.Tasks.FetchDueTasks(ctx, batchSize)
+	tasks, err := t.store.Tasks.FetchDueTasks(ctx, batchSize)
+	if err != nil {
+		return nil, &AppError{
+			Message: "failed to fetch due tasks",
+			Err:     fmt.Errorf("store error: %w", err),
+		}
+	}
+	return tasks, nil
 }

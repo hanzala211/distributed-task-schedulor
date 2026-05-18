@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"strings"
 
 	"github.com/hanzala211/go-backend-template/internal/models"
 )
@@ -51,6 +52,11 @@ func (t *TasksRepo) InsertTask(ctx context.Context, tasksModel *models.Tasks, de
 	for _, parentID := range dependencies {
 		_, err := tx.ExecContext(ctx, query2, parentID, task.ID)
 		if err != nil {
+			if strings.Contains(err.Error(), "foreign key constraint") {
+				return nil, ErrNotFound
+			} else if strings.Contains(err.Error(), "unique constraint") {
+				return nil, ErrConflict
+			}
 			return nil, err
 		}
 	}
@@ -91,22 +97,40 @@ func (t *TasksRepo) FetchDueTasks(ctx context.Context, batchSize int) ([]*models
 
 func (t *TasksRepo) UpdateTaskStatus(ctx context.Context, status string, taskID string) error {
 	query := `UPDATE tasks SET status = $1 WHERE id = $2;`
-	_, err := t.db.ExecContext(ctx, query, status, taskID)
+	res, err := t.db.ExecContext(ctx, query, status, taskID)
 	if err != nil {
 		return err
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrNotFound
 	}
 	return nil
 }
 
 func (t *TasksRepo) MarkTaskSucceed(ctx context.Context, taskID string) error {
 	tx, err := t.db.BeginTx(ctx, nil)
-	defer tx.Rollback()
-
-	query1 := `UPDATE tasks SET status = 'succeed' WHERE id = $1`
-	_, err = tx.ExecContext(ctx, query1, taskID)
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
+
+	query1 := `UPDATE tasks SET status = 'succeed' WHERE id = $1`
+	res, err := tx.ExecContext(ctx, query1, taskID)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
 	query2 := `UPDATE tasks SET status = 'pending'
 		WHERE id IN (
 			SELECT child_id FROM task_dependencies WHERE parent_id = $1
@@ -134,9 +158,16 @@ func (t *TasksRepo) MarkTaskStatusFailed(ctx context.Context, task *models.Tasks
 		SET status = $2, run_at = $3, retry_count = $4
 		WHERE id = $1;
 	`
-	_, err := t.db.ExecContext(ctx, query, task.ID, task.Status, task.RunAt, task.RetryCount)
+	res, err := t.db.ExecContext(ctx, query, task.ID, task.Status, task.RunAt, task.RetryCount)
 	if err != nil {
 		return err
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrNotFound
 	}
 	return nil
 }
