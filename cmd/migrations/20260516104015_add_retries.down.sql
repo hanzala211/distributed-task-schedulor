@@ -1,2 +1,2 @@
-ALTER TABLE IF EXISTS tasks DROP COLUMN retry_counts;
-ALTER TABLE IF EXISTS tasks DROP COLUMN max_retries;
+ALTER TABLE tasks DROP COLUMN IF EXISTS retry_counts;
+ALTER TABLE tasks DROP COLUMN IF EXISTS max_retries;

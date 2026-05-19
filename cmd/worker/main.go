@@ -90,7 +90,8 @@ func main() {
 func workerNode(task chan *models.Tasks, logger *zap.SugaredLogger, service *service.Service, workerID int, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for task := range task {
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 		httpReq, err := http.NewRequest("POST", task.TargetURL, bytes.NewBuffer(task.Payload))
 		if err != nil {
 			service.Task.HandleTaskFailure(ctx, task, maxRetries)

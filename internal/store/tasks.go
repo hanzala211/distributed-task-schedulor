@@ -69,9 +69,11 @@ func (t *TasksRepo) InsertTask(ctx context.Context, tasksModel *models.Tasks, de
 
 func (t *TasksRepo) FetchDueTasks(ctx context.Context, batchSize int) ([]*models.Tasks, error) {
 	tasks := []*models.Tasks{}
-	query := `UPDATE tasks SET status = 'running' WHERE id IN (
+	query := `UPDATE tasks SET status = 'running', started_at = NOW() WHERE id IN (
 		SELECT id FROM tasks t
-		WHERE status = 'pending' AND run_at <= NOW()
+		WHERE
+		(status = 'pending' AND run_at <= NOW())
+		 OR (status = 'running' AND started_at < NOW() - INTERVAL '5 minutes')
 		ORDER BY priority DESC, run_at ASC
 		FOR UPDATE SKIP LOCKED
 		LIMIT $1
