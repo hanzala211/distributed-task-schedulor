@@ -46,7 +46,7 @@ func (t *TaskService) HandleTaskFailure(ctx context.Context, task *models.Tasks,
 		task.Status = "failed"
 	} else {
 		task.Status = "pending"
-		task.RunAt = time.Now().Add(30 * time.Second)
+		task.RunAt = time.Now().UTC().Add(30 * time.Second)
 	}
 	err := t.store.Tasks.MarkTaskStatusFailed(ctx, task)
 	if err != nil {
