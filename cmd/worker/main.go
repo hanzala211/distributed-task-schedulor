@@ -87,34 +87,38 @@ func main() {
 	logger.Info("All Channels are closed!")
 }
 
-func workerNode(task chan *models.Tasks, logger *zap.SugaredLogger, service *service.Service, workerID int, wg *sync.WaitGroup) {
+func workerNode(tasksChan chan *models.Tasks, logger *zap.SugaredLogger, service *service.Service, workerID int, wg *sync.WaitGroup) {
 	defer wg.Done()
-	for task := range task {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		httpReq, err := http.NewRequest("POST", task.TargetURL, bytes.NewBuffer(task.Payload))
-		if err != nil {
-			service.Task.HandleTaskFailure(ctx, task, maxRetries)
-			logger.Errorw("Failed to create the HTTP Req", "error", err, "taskId", task.ID, "Prority", task.Priority, "Worker", workerID)
-			continue
-		}
-		httpReq.Header.Add("Content-Type", "application/json")
-		resp, err := httpClient.Do(httpReq)
-		if err != nil {
-			err := service.Task.HandleTaskFailure(ctx, task, maxRetries)
-			if err != nil {
-				logger.Errorw("CRITICAL: Failed to update database status", "error", err, "task_id", task.ID, "Priority", task.Priority, "Worker", workerID)
-			}
-			logger.Errorw("Webhook delivery failed", "error", err, "taskId", task.ID, "Priority", task.Priority, "Worker", workerID)
-			continue
-		}
-		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
-			logger.Infow("Webhook delivered successfully", "status", resp.StatusCode, "task_id", task.ID, "Priority", task.Priority, "Worker", workerID)
-			service.Task.ChangeStatus(ctx, task, "succeed")
-		} else {
-			logger.Errorw("Webhook rejected by target", "status", resp.StatusCode, "task_id", task.ID, "Priority", task.Priority, "Worker", workerID)
-			service.Task.HandleTaskFailure(ctx, task, maxRetries)
-		}
-		resp.Body.Close()
+	for task := range tasksChan {
+		processTask(task, service, logger, maxRetries, workerID)
 	}
+}
+
+func processTask(task *models.Tasks, service *service.Service, logger *zap.SugaredLogger, maxRetries int, workerID int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	httpReq, err := http.NewRequest("POST", task.TargetURL, bytes.NewBuffer(task.Payload))
+	if err != nil {
+		service.Task.HandleTaskFailure(ctx, task, maxRetries)
+		logger.Errorw("Failed to create the HTTP Req", "error", err, "taskId", task.ID, "Prority", task.Priority, "Worker", workerID)
+		return
+	}
+	httpReq.Header.Add("Content-Type", "application/json")
+	resp, err := httpClient.Do(httpReq)
+	if err != nil {
+		err := service.Task.HandleTaskFailure(ctx, task, maxRetries)
+		if err != nil {
+			logger.Errorw("CRITICAL: Failed to update database status", "error", err, "task_id", task.ID, "Priority", task.Priority, "Worker", workerID)
+		}
+		logger.Errorw("Webhook delivery failed", "error", err, "taskId", task.ID, "Priority", task.Priority, "Worker", workerID)
+		return
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+		logger.Infow("Webhook delivered successfully", "status", resp.StatusCode, "task_id", task.ID, "Priority", task.Priority, "Worker", workerID)
+		service.Task.ChangeStatus(ctx, task, "succeed")
+	} else {
+		logger.Errorw("Webhook rejected by target", "status", resp.StatusCode, "task_id", task.ID, "Priority", task.Priority, "Worker", workerID)
+		service.Task.HandleTaskFailure(ctx, task, maxRetries)
+	}
+	resp.Body.Close()
 }
