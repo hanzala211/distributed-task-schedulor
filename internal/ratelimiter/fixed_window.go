@@ -5,41 +5,63 @@ import (
 	"time"
 )
 
+type clientWindow struct {
+	count   int
+	resetAt time.Time
+}
+
 type FixedWindowLimiter struct {
-	sync.RWMutex
+	mu      sync.Mutex
 	Limit   int
 	Window  time.Duration
-	clients map[string]int
+	clients map[string]*clientWindow
 }
 
 func NewFixedWindowLimiter(limit int, window time.Duration) *FixedWindowLimiter {
-	return &FixedWindowLimiter{
+	limiter := &FixedWindowLimiter{
 		Limit:   limit,
 		Window:  window,
-		clients: make(map[string]int),
+		clients: make(map[string]*clientWindow),
 	}
+	go limiter.cleanup()
+	return limiter
 }
 
 func (f *FixedWindowLimiter) Allow(ip string) (bool, time.Duration) {
-	f.RLock()
-	count, exists := f.clients[ip]
-	f.RUnlock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
-	if !exists || count < f.Limit {
-		f.Lock()
-		if !exists {
-			go f.resetCount(ip)
+	now := time.Now()
+	cw, exists := f.clients[ip]
+
+	if !exists || now.After(cw.resetAt) {
+		f.clients[ip] = &clientWindow{
+			count:   1,
+			resetAt: now.Add(f.Window),
 		}
-		f.clients[ip]++
-		f.Unlock()
 		return true, 0
 	}
-	return false, f.Window
+
+	if cw.count < f.Limit {
+		cw.count++
+		return true, 0
+	}
+
+	return false, time.Until(cw.resetAt)
 }
 
-func (f *FixedWindowLimiter) resetCount(ip string) {
-	time.Sleep(f.Window)
-	f.Lock()
-	delete(f.clients, ip)
-	f.Unlock()
+func (f *FixedWindowLimiter) cleanup() {
+	ticker := time.NewTicker(f.Window)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		f.mu.Lock()
+		now := time.Now()
+		for ip, cw := range f.clients {
+			if now.After(cw.resetAt) {
+				delete(f.clients, ip)
+			}
+		}
+		f.mu.Unlock()
+	}
 }

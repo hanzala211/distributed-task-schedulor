@@ -26,7 +26,7 @@ func (app *application) addTask(w http.ResponseWriter, r *http.Request) {
 				return
 			} else if errors.Is(appErr.Err, store.ErrNotFound) {
 				app.logger.Error(appErr.Message, "deps", req.Dependencies)
-				app.writeJSONError(w, http.StatusConflict, "One or more dependent task do not exist")
+				app.writeJSONError(w, http.StatusBadRequest, "One or more dependent task do not exist")
 				return
 			} else {
 				app.logger.Errorw("failed to add task", zap.Error(err))
