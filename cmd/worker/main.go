@@ -92,7 +92,7 @@ func workerNode(tasksChan chan *models.Tasks, logger *zap.SugaredLogger, service
 	for task := range tasksChan {
 		processTask(task, service, logger, maxRetries, workerID)
 	}
-}
+} // test
 
 func processTask(task *models.Tasks, service *service.Service, logger *zap.SugaredLogger, maxRetries int, workerID int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
